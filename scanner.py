@@ -45,8 +45,6 @@ def send_telegram(message):
 # SYMBOLS (SAFE + STABLE)
 # ----------------------------
 
-def get_symbols():
-
     url = "https://api.binance.com/api/v3/exchangeInfo"
 
     for _ in range(5):
