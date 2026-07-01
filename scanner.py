@@ -24,13 +24,13 @@ session = requests.Session()
 def send_telegram(message):
 
     if not BOT_TOKEN or not CHAT_ID:
-        print("Telegram credentials missing")
+        print("Missing Telegram credentials")
         return
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
     try:
-        requests.post(
+        session.post(
             url,
             data={
                 "chat_id": CHAT_ID,
@@ -42,40 +42,41 @@ def send_telegram(message):
         print("Telegram error:", e)
 
 # ----------------------------
-# SYMBOL LIST (FIXED)
+# SYMBOLS (SAFE + STABLE)
 # ----------------------------
 
 def get_symbols():
 
     url = "https://api.binance.com/api/v3/exchangeInfo"
 
-    for attempt in range(5):
+    for _ in range(5):
 
         try:
             res = session.get(url, timeout=20)
             data = res.json()
 
             # SAFE CHECK
-            if not isinstance(data, dict) or "symbols" not in data:
-                print("Binance warning:", data)
+            if not isinstance(data, dict):
                 continue
 
-            symbols = [
+            if "symbols" not in data:
+                print("Binance response error:", data)
+                continue
+
+            return [
                 s["symbol"]
                 for s in data["symbols"]
                 if s.get("status") == "TRADING"
                 and s.get("quoteAsset") == "USDT"
             ]
 
-            return symbols
-
         except Exception as e:
-            print(f"get_symbols error attempt {attempt+1}:", e)
+            print("get_symbols error:", e)
 
     return []
 
 # ----------------------------
-# DOWNLOAD CANDLES
+# CANDLES
 # ----------------------------
 
 def get_dataframe(symbol):
@@ -88,12 +89,10 @@ def get_dataframe(symbol):
 
         data = session.get(url, timeout=20).json()
 
-        df = pd.DataFrame(data)
-
-        if df.empty:
+        if not isinstance(data, list):
             return None
 
-        df = df[[0, 1, 2, 3, 4]]
+        df = pd.DataFrame(data)[[0,1,2,3,4]]
         df.columns = ["time", "open", "high", "low", "close"]
 
         df["close"] = df["close"].astype(float)
@@ -105,7 +104,7 @@ def get_dataframe(symbol):
         return None
 
 # ----------------------------
-# EMA CHECK
+# EMA LOGIC
 # ----------------------------
 
 def check_signal(df):
@@ -121,35 +120,25 @@ def check_signal(df):
     if len(df) < 60:
         return None
 
-    # trend filter
     if df["ema20"].iloc[-1] <= df["ema50"].iloc[-1]:
         return None
 
-    prev20 = df["ema20"].iloc[-2]
-    prev50 = df["ema50"].iloc[-2]
-
-    curr20 = df["ema20"].iloc[-1]
-    curr50 = df["ema50"].iloc[-1]
+    prev20, prev50 = df["ema20"].iloc[-2], df["ema50"].iloc[-2]
+    curr20, curr50 = df["ema20"].iloc[-1], df["ema50"].iloc[-1]
 
     # Fresh cross
     if prev20 <= prev50 and curr20 > curr50:
         return "fresh"
 
-    # Old cross
+    # Old cross (last 6 candles)
     for i in range(len(df) - 6, len(df)):
-        p20 = df["ema20"].iloc[i - 1]
-        p50 = df["ema50"].iloc[i - 1]
-
-        c20 = df["ema20"].iloc[i]
-        c50 = df["ema50"].iloc[i]
-
-        if p20 <= p50 and c20 > c50:
+        if df["ema20"].iloc[i-1] <= df["ema50"].iloc[i-1] and df["ema20"].iloc[i] > df["ema50"].iloc[i]:
             return "old"
 
     return None
 
 # ----------------------------
-# SCAN SINGLE COIN
+# SCAN COIN
 # ----------------------------
 
 def scan_coin(symbol):
@@ -167,7 +156,7 @@ def scan_coin(symbol):
     return None
 
 # ----------------------------
-# SCAN ALL SYMBOLS
+# SCAN ALL
 # ----------------------------
 
 def run_scan():
@@ -175,21 +164,17 @@ def run_scan():
     symbols = get_symbols()
 
     if not symbols:
-        print("No symbols found!")
         return [], [], 0
 
-    fresh = []
-    old = []
-
-    total = len(symbols)
+    fresh, old = [], []
 
     with ThreadPoolExecutor(max_workers=10) as executor:
 
         futures = [executor.submit(scan_coin, s) for s in symbols]
 
-        for future in as_completed(futures):
+        for f in as_completed(futures):
 
-            result = future.result()
+            result = f.result()
 
             if result is None:
                 continue
@@ -201,10 +186,10 @@ def run_scan():
             elif signal == "old":
                 old.append(symbol)
 
-    return fresh, old, total
+    return fresh, old, len(symbols)
 
 # ----------------------------
-# MESSAGE FORMAT
+# MESSAGE
 # ----------------------------
 
 def build_message(fresh, old, total):
