@@ -39,8 +39,6 @@ def send_telegram(message):
 import requests
 import time
 
-def get_symbols():
-
     url = "https://api.binance.com/api/v3/exchangeInfo"
 
     session = requests.Session()
