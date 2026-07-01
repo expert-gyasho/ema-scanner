@@ -32,33 +32,30 @@ def send_telegram(message):
     try:
         session.post(
             url,
-            data={
-                "chat_id": CHAT_ID,
-                "text": message
-            },
+            data={"chat_id": CHAT_ID, "text": message},
             timeout=30
         )
     except Exception as e:
         print("Telegram error:", e)
 
 # ----------------------------
-# SYMBOLS (SAFE + STABLE)
+# SYMBOLS (FIXED - THIS WAS MISSING)
 # ----------------------------
+
+def get_symbols():
 
     url = "https://api.binance.com/api/v3/exchangeInfo"
 
     for _ in range(5):
 
         try:
-            res = session.get(url, timeout=20)
-            data = res.json()
+            data = session.get(url, timeout=20).json()
 
-            # SAFE CHECK
             if not isinstance(data, dict):
                 continue
 
             if "symbols" not in data:
-                print("Binance response error:", data)
+                print("Binance error:", data)
                 continue
 
             return [
@@ -124,11 +121,9 @@ def check_signal(df):
     prev20, prev50 = df["ema20"].iloc[-2], df["ema50"].iloc[-2]
     curr20, curr50 = df["ema20"].iloc[-1], df["ema50"].iloc[-1]
 
-    # Fresh cross
     if prev20 <= prev50 and curr20 > curr50:
         return "fresh"
 
-    # Old cross (last 6 candles)
     for i in range(len(df) - 6, len(df)):
         if df["ema20"].iloc[i-1] <= df["ema50"].iloc[i-1] and df["ema20"].iloc[i] > df["ema50"].iloc[i]:
             return "old"
@@ -167,11 +162,9 @@ def run_scan():
     fresh, old = [], []
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-
         futures = [executor.submit(scan_coin, s) for s in symbols]
 
         for f in as_completed(futures):
-
             result = f.result()
 
             if result is None:
@@ -181,7 +174,7 @@ def run_scan():
 
             if signal == "fresh":
                 fresh.append(symbol)
-            elif signal == "old":
+            else:
                 old.append(symbol)
 
     return fresh, old, len(symbols)
