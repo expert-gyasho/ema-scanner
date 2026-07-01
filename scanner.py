@@ -1,103 +1,286 @@
 import os
-import logging
 import requests
 import pandas as pd
 from ta.trend import EMAIndicator
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 
-TOKEN = os.getenv("BOT_TOKEN")
+# ----------------------------
+# CONFIG
+# ----------------------------
 
-logging.basicConfig(level=logging.INFO)
+TIMEFRAME = "4h"
+LIMIT = 100
 
-BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
+# ----------------------------
+# TELEGRAM
+# ----------------------------
 
-# ---------------- SAFE API ----------------
-def safe_get(url, params=None):
+def send_telegram(message):
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+    requests.post(
+        url,
+        data={
+            "chat_id": CHAT_ID,
+            "text": message
+        },
+        timeout=30
+    )
+
+# ----------------------------
+# SYMBOL LIST
+# ----------------------------
+
+def get_symbols():
+
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+
+    data = requests.get(url, timeout=20).json()
+
+    symbols = []
+
+    for s in data["symbols"]:
+
+        if (
+            s["status"] == "TRADING"
+            and s["quoteAsset"] == "USDT"
+        ):
+
+            symbols.append(s["symbol"])
+
+    return symbols
+
+# ----------------------------
+# DOWNLOAD CANDLES
+# ----------------------------
+
+def get_dataframe(symbol):
+
     try:
-        r = requests.get(url, params=params, timeout=10)
-        return r.json()
-    except Exception as e:
-        logging.error(f"API Error: {e}")
+
+        url = (
+            f"https://api.binance.com/api/v3/klines?"
+            f"symbol={symbol}"
+            f"&interval={TIMEFRAME}"
+            f"&limit={LIMIT}"
+        )
+
+        data = requests.get(url, timeout=20).json()
+
+        df = pd.DataFrame(data)
+
+        df = df[[0,1,2,3,4]]
+
+        df.columns = [
+            "time",
+            "open",
+            "high",
+            "low",
+            "close"
+        ]
+
+        df["close"] = df["close"].astype(float)
+
+        return df
+
+    except:
+
         return None
+        # ----------------------------
+# EMA CHECK
+# ----------------------------
 
+def check_signal(df):
 
-# ---------------- GET DATA (4H ONLY) ----------------
-def get_data(symbol="BTCUSDT"):
-    params = {
-        "symbol": symbol,
-        "interval": "4h",
-        "limit": 200
-    }
-
-    data = safe_get(BINANCE_KLINES_URL, params)
-
-    if not isinstance(data, list):
+    if df is None:
         return None
-
-    if len(data) < 60:
-        return None
-
-    df = pd.DataFrame(data, columns=[
-        "time", "open", "high", "low", "close", "volume",
-        "c1", "c2", "c3", "c4", "c5", "c6"
-    ])
-
-    df["close"] = pd.to_numeric(df["close"], errors="coerce")
-    df = df.dropna()
 
     if len(df) < 60:
         return None
 
-    return df
+    df["ema20"] = EMAIndicator(
+        close=df["close"],
+        window=20
+    ).ema_indicator()
+
+    df["ema50"] = EMAIndicator(
+        close=df["close"],
+        window=50
+    ).ema_indicator()
+
+    # Current EMA20 must be above EMA50
+
+    if df["ema20"].iloc[-1] <= df["ema50"].iloc[-1]:
+        return None
+
+    # ============================
+    # Fresh Cross (Last Closed Candle)
+    # ============================
+
+    prev20 = df["ema20"].iloc[-2]
+    prev50 = df["ema50"].iloc[-2]
+
+    curr20 = df["ema20"].iloc[-1]
+    curr50 = df["ema50"].iloc[-1]
+
+    if prev20 <= prev50 and curr20 > curr50:
+        return "fresh"
+
+    # ============================
+    # Old Cross (Last 24 Hours)
+    # 6 Closed Candles
+    # ============================
+
+    for i in range(-6, -1):
+
+        p20 = df["ema20"].iloc[i - 1]
+        p50 = df["ema50"].iloc[i - 1]
+
+        c20 = df["ema20"].iloc[i]
+        c50 = df["ema50"].iloc[i]
+
+        if p20 <= p50 and c20 > c50:
+            return "old"
+
+    return None
 
 
-# ---------------- EMA STRATEGY ----------------
-def check_ema(df):
-    if df is None:
-        return "⚠️ Not enough data"
+# ----------------------------
+# SCAN SINGLE COIN
+# ----------------------------
 
-    ema20 = EMAIndicator(df["close"], window=20).ema_indicator()
-    ema50 = EMAIndicator(df["close"], window=50).ema_indicator()
+def scan_coin(symbol):
 
-    if ema20.iloc[-2] < ema50.iloc[-2] and ema20.iloc[-1] > ema50.iloc[-1]:
-        return "📈 BUY SIGNAL (4H EMA 20 crossed above EMA 50)"
+    try:
 
-    if ema20.iloc[-2] > ema50.iloc[-2] and ema20.iloc[-1] < ema50.iloc[-1]:
-        return "📉 SELL SIGNAL (4H EMA 20 crossed below EMA 50)"
+        df = get_dataframe(symbol)
 
-    return "NO SIGNAL"
+        signal = check_signal(df)
+
+        if signal is None:
+            return None
+
+        return (
+            symbol,
+            signal
+        )
+
+    except Exception:
+
+        return None
+        # ----------------------------
+# SCAN ALL SYMBOLS
+# ----------------------------
+
+def run_scan():
+
+    symbols = get_symbols()
+
+    fresh = []
+    old = []
+
+    total = len(symbols)
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+
+        futures = {
+            executor.submit(scan_coin, symbol): symbol
+            for symbol in symbols
+        }
+
+        for future in as_completed(futures):
+
+            result = future.result()
+
+            if result is None:
+                continue
+
+            symbol, signal = result
+
+            if signal == "fresh":
+                fresh.append(symbol)
+
+            elif signal == "old":
+                old.append(symbol)
+
+    return fresh, old, total
 
 
-# ---------------- TELEGRAM HANDLERS ----------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 4H EMA Scanner Bot Started")
+# ----------------------------
+# MESSAGE FORMAT
+# ----------------------------
+
+def build_message(fresh, old, total):
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist)
+
+    message = ""
+
+    message += "🚀 EMA20 × EMA50 Scanner\n\n"
+
+    message += f"📅 {now.strftime('%d-%m-%Y')}\n"
+    message += f"⏰ {now.strftime('%I:%M %p')} IST\n\n"
+
+    message += "=====================\n"
+    message += "🔥 Fresh Cross (4 Hours)\n"
+    message += "=====================\n\n"
+
+    if fresh:
+
+        for coin in sorted(fresh):
+            message += coin + "\n"
+
+    else:
+
+        message += "No Fresh Cross\n"
+
+    message += f"\nTotal : {len(fresh)}\n\n"
+
+    message += "=====================\n"
+    message += "📈 Old Cross (24 Hours)\n"
+    message += "=====================\n\n"
+
+    if old:
+
+        for coin in sorted(old):
+            message += coin + "\n"
+
+    else:
+
+        message += "No Old Cross\n"
+
+    message += f"\nTotal : {len(old)}\n\n"
+
+    message += "=====================\n"
+    message += f"📊 Total Coins Scanned : {total}\n"
+    message += "\n✅ Scan Completed"
+
+    return message
 
 
-async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    symbol = "BTCUSDT"
+# ----------------------------
+# MAIN
+# ----------------------------
 
-    df = get_data(symbol)
-    signal = check_ema(df)
+def main():
 
-    await update.message.reply_text(
-        f"📊 {symbol} (4H)\n{signal}"
+    fresh, old, total = run_scan()
+
+    message = build_message(
+        fresh,
+        old,
+        total
     )
 
+    print(message)
 
-# ---------------- MAIN ----------------
-def main():
-    if not TOKEN:
-        raise Exception("BOT_TOKEN missing in environment variables")
-
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("scan", scan))
-
-    print("🚀 4H EMA Scanner Running...")
-    app.run_polling()
+    send_telegram(message)
 
 
 if __name__ == "__main__":
