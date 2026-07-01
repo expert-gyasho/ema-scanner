@@ -36,7 +36,41 @@ def send_telegram(message):
 # SYMBOL LIST
 # ----------------------------
 
+import requests
+import time
+
 def get_symbols():
+
+    url = "https://api.binance.com/api/v3/exchangeInfo"
+
+    session = requests.Session()
+
+    for attempt in range(3):  # retry system
+        try:
+            response = session.get(url, timeout=20)
+            data = response.json()
+
+            # ✅ SAFE CHECK (THIS FIXES YOUR ERROR)
+            if not isinstance(data, dict) or "symbols" not in data:
+                print(f"Binance API warning (attempt {attempt+1}):", data)
+                time.sleep(2)
+                continue
+
+            symbols = [
+                s["symbol"]
+                for s in data["symbols"]
+                if s.get("status") == "TRADING"
+                and s.get("quoteAsset") == "USDT"
+            ]
+
+            return symbols
+
+        except Exception as e:
+            print(f"get_symbols error (attempt {attempt+1}):", e)
+            time.sleep(2)
+
+    # If all fails → safe fallback
+    return []
 
     url = "https://api.binance.com/api/v3/exchangeInfo"
 
