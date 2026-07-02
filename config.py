@@ -1,9 +1,18 @@
 import os
+from dotenv import load_dotenv
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+load_dotenv()
 
-TIMEFRAME = "4h"
-LIMIT = 120
+# Telegram
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-BASE_URL = "https://api.binance.com"
+# Binance
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
+BINANCE_SECRET = os.getenv("BINANCE_SECRET")
+
+# Scanner Settings
+TIMEFRAME = os.getenv("TIMEFRAME", "4h")
+EMA_FAST = int(os.getenv("EMA_FAST", 20))
+EMA_SLOW = int(os.getenv("EMA_SLOW", 50))
+MIN_VOLUME = float(os.getenv("MIN_VOLUME", 100000))
