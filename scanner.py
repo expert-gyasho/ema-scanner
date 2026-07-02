@@ -14,7 +14,7 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 
-BINANCE_REST = "https://api.binance.com"
+BINANCE_REST = "https://api.binance.us"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
