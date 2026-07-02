@@ -1,16 +1,3 @@
-print("===== SCANNER STARTED =====")
-send_message("🚀 GitHub Test Message")
-print("===== MESSAGE FUNCTION CALLED =====")
-send_message("✅ GitHub Action Started\n\nEMA Scanner is running successfully.")
-# scanner.py
-# Binance Spot USDT EMA20/50 bullish crossover screener (4H)
-# - Scans all Binance SPOT USDT symbols (TRADING)
-# - Detects last bullish EMA20 cross above EMA50 within last 48h (12 x 4H candles)
-# - Alerts only if crossover was 0 / 1 / 2 / 4 / 5 candles ago
-# - Shows ONLY: coin name + (how many candles ago) + EMA100/200 on 4H + EMA100/200 on 1D
-# - Telegram alert + TradingView chart link (best universal https chart link)
-# - Designed for GitHub Actions scheduled runs on IST candle closes
-
 import os
 import asyncio
 import aiohttp
