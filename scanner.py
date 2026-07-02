@@ -21,6 +21,9 @@ IST = timezone(timedelta(hours=5, minutes=30))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
+# Proxy configuration for geographic restrictions (optional)
+PROXY_URL = os.getenv("PROXY_URL", None)
+
 MAX_CONCURRENCY = int(os.getenv("MAX_CONCURRENCY", "10"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "20"))
 PER_SYMBOL_DELAY_SEC = float(os.getenv("PER_SYMBOL_DELAY_SEC", "0.02"))
@@ -49,7 +52,7 @@ def _ema(series: pd.Series, span: int) -> pd.Series:
 
 async def fetch_json(session: aiohttp.ClientSession, url: str, params: dict = None) -> dict:
     params = params or {}
-    async with session.get(url, params=params, timeout=REQUEST_TIMEOUT) as resp:
+    async with session.get(url, params=params, timeout=REQUEST_TIMEOUT, proxy=PROXY_URL) as resp:
         # Binance sometimes returns JSON error payloads with non-200 too
         try:
             data = await resp.json()
