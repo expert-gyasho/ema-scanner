@@ -1,35 +1,33 @@
-name: EMA Scanner
+name: EMA Screener (Binance USDT)
 
 on:
-
   workflow_dispatch:
-
   schedule:
-    - cron: '0 */4 * * *'
+    # IST candle closes: 05:30, 09:30, 13:30, 17:30, 21:30, 01:30
+    # GitHub schedule is UTC => IST-5:30
+    - cron: "0 0,4,8,12,16,20 * * *"  # 00:00,04:00,08:00,12:00,16:00,20:00 UTC
 
 jobs:
-
-  scanner:
-
+  run:
     runs-on: ubuntu-latest
-
     steps:
+      - uses: actions/checkout@v4
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Libraries
+      - name: Install deps
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Scanner
+      - name: Run scanner
         env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ 8675841494:AAEzmnO0CdlxuAQb5GquESV8NID4IN2PIKI }}
+          TELEGRAM_CHAT_ID: ${{ secrets.6816154549 }}
+          MAX_CONCURRENCY: "8"
+          PER_SYMBOL_DELAY_SEC: "0.03"
+          TG_BETWEEN_MSG_DELAY_SEC: "0.7"
         run: |
           python scanner.py
