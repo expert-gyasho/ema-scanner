@@ -4,8 +4,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Telegram
-TELEGRAM_BOT_TOKEN = os.getenv(8675841494:AAEzmnO0CdlxuAQb5GquESV8NID4IN2PIKI)
-TELEGRAM_CHAT_ID = os.getenv(6816154549)
+TELEGRAM_BOT_TOKEN = os.getenv("8675841494:AAEzmnO0CdlxuAQb5GquESV8NID4IN2PIKI")
+TELEGRAM_CHAT_ID = os.getenv("6816154549")
 # Binance
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
 BINANCE_SECRET = os.getenv("BINANCE_SECRET")
