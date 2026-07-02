@@ -87,11 +87,25 @@ def find_last_bullish_cross_offset(
     return None
 
 
-async def fetch_json(session: aiohttp.ClientSession, url: str, params: Dict) -> dict:
+async def fetch_json(session: aiohttp.ClientSession, url: str, params: Dict) -> Optional[dict]:
+    """
+    Fetch JSON with timeout. Handles Binance HTTP 451 (restricted location) gracefully by
+    returning an empty dict so callers can decide how to proceed instead of crashing the job.
+    """
     timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)
     async with session.get(url, params=params, timeout=timeout) as resp:
         # Binance sometimes returns JSON on error too
-        data = await resp.json(content_type=None)
+        # Use content_type=None to allow non-standard content-types
+        try:
+            data = await resp.json(content_type=None)
+        except Exception:
+            # fallback to text if JSON parsing fails
+            text = await resp.text()
+            data = {"_raw": text}
+
+        if resp.status == 451:
+            print(f"[WARN] HTTP 451 from {url}: {str(data)[:300]}")
+            return {}
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status} from {url}: {str(data)[:300]}")
         return data
@@ -100,6 +114,10 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, params: Dict) -> 
 async def get_usdt_spot_symbols(session: aiohttp.ClientSession) -> List[str]:
     url = f"{BINANCE_REST}/api/v3/exchangeInfo"
     data = await fetch_json(session, url, params={})
+
+    if not data:
+        print("[WARN] exchangeInfo unavailable or empty; returning no symbols")
+        return []
 
     symbols = []
     for s in data.get("symbols", []):
@@ -127,6 +145,15 @@ async def get_klines(
 ) -> pd.DataFrame:
     url = f"{BINANCE_REST}/api/v3/klines"
     data = await fetch_json(session, url, params={"symbol": symbol, "interval": interval, "limit": limit})
+
+    if not data:
+        print(f"[WARN] Klines for {symbol} {interval} unavailable; returning empty DataFrame")
+        # return empty DataFrame with expected columns
+        return pd.DataFrame(columns=[
+            "openTime", "open", "high", "low", "close", "volume",
+            "closeTime", "quoteAssetVolume", "numTrades",
+            "takerBuyBaseVol", "takerBuyQuoteVol", "ignore"
+        ])
 
     # Binance kline array format:
     # [ openTime, open, high, low, close, volume, closeTime, ... ]
@@ -163,6 +190,8 @@ async def scan_symbol(
         try:
             # 4H data for crossover + EMA100/200 4H
             df4h = await get_klines(session, symbol, "4h", CANDLE_LIMIT_4H)
+            if df4h.empty:
+                return None
             close4h = df4h["close"]
             offset = find_last_bullish_cross_offset(close4h, max_lookback=12)
 
@@ -173,6 +202,8 @@ async def scan_symbol(
 
             # 1D EMA100/200
             df1d = await get_klines(session, symbol, "1d", CANDLE_LIMIT_1D)
+            if df1d.empty:
+                return None
             close1d = df1d["close"]
             ema100_1d, ema200_1d = compute_ema100_200_from_close(close1d)
 
