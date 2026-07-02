@@ -7,9 +7,6 @@ from config import (
 
 
 def send_message(message):
-    """
-    Send message to Telegram
-    """
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials missing.")
@@ -24,6 +21,17 @@ def send_message(message):
     }
 
     try:
-        requests.post(url, data=payload, timeout=20)
+
+        response = requests.post(
+            url,
+            data=payload,
+            timeout=20
+        )
+
+        print("Status Code :", response.status_code)
+        print("Response :", response.text)
+
+        response.raise_for_status()
+
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        print("Telegram Error :", e)
