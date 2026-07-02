@@ -1,3 +1,6 @@
+print("===== SCANNER STARTED =====")
+send_message("🚀 GitHub Test Message")
+print("===== MESSAGE FUNCTION CALLED =====")
 send_message("✅ GitHub Action Started\n\nEMA Scanner is running successfully.")
 # scanner.py
 # Binance Spot USDT EMA20/50 bullish crossover screener (4H)
