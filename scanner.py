@@ -1,227 +1,136 @@
 import os
-import requests
-import pandas as pd
-from ta.trend import EMAIndicator
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+import json
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-# ----------------------------
-# CONFIG
-# ----------------------------
+import ccxt
 
-TIMEFRAME = "4h"
-LIMIT = 100
+from config import (
+    TIMEFRAME,
+    EMA_FAST,
+    EMA_SLOW,
+)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+from exchange import get_ohlcv
+from indicators import (
+    add_ema,
+    is_golden_cross,
+    volume_confirmed,
+)
+from telegram_bot import send_message
 
-session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-# ----------------------------
-# TELEGRAM
-# ----------------------------
+SIGNAL_FILE = "data/signals.json"
 
-def send_telegram(message):
+IST = ZoneInfo("Asia/Kolkata")
 
-    if not BOT_TOKEN or not CHAT_ID:
-        print("Missing Telegram credentials")
-        return
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+# ==========================
+# Signal File
+# ==========================
 
-    try:
-        session.post(
-            url,
-            data={"chat_id": CHAT_ID, "text": message},
-            timeout=30
-        )
-    except Exception as e:
-        print("Telegram error:", e)
+def load_signals():
 
-# ----------------------------
-# SYMBOLS (SAFE + STABLE)
-# ----------------------------
-
-def get_symbols():
-
-    url = "https://api.binance.com/api/v3/exchangeInfo"
+    if not os.path.exists(SIGNAL_FILE):
+        return {}
 
     try:
-        res = session.get(url, timeout=20)
-        data = res.json()
+        with open(SIGNAL_FILE, "r") as f:
+            return json.load(f)
 
-        # safety checks
-        if not isinstance(data, dict):
-            print("Invalid response type")
-            return []
+    except:
+        return {}
 
-        if "symbols" not in data:
-            print("Binance API blocked / rate limit:", data)
-            return []
 
-        return [
-            s["symbol"]
-            for s in data["symbols"]
-            if s.get("status") == "TRADING"
-            and s.get("quoteAsset") == "USDT"
-        ]
+def save_signals(data):
 
-    except Exception as e:
-        print("get_symbols error:", e)
-        return []
+    os.makedirs("data", exist_ok=True)
 
-# ----------------------------
-# CANDLES
-# ----------------------------
+    with open(SIGNAL_FILE, "w") as f:
+        json.dump(data, f, indent=4)
 
-def get_dataframe(symbol):
 
-    try:
-        url = (
-            f"https://api.binance.com/api/v3/klines?"
-            f"symbol={symbol}&interval={TIMEFRAME}&limit={LIMIT}"
-        )
+# ==========================
+# Binance
+# ==========================
 
-        data = session.get(url, timeout=20).json()
+exchange = ccxt.binance({
+    "enableRateLimit": True,
+})
 
-        if not isinstance(data, list):
-            return None
 
-        df = pd.DataFrame(data)[[0,1,2,3,4]]
-        df.columns = ["time", "open", "high", "low", "close"]
-        df["close"] = df["close"].astype(float)
+def get_all_usdt_pairs():
 
-        return df
+    markets = exchange.load_markets()
 
-    except Exception as e:
-        print(f"Data error {symbol}:", e)
-        return None
+    pairs = []
 
-# ----------------------------
-# EMA SIGNAL LOGIC
-# ----------------------------
+    for symbol, market in markets.items():
 
-def check_signal(df):
+        if not market["spot"]:
+            continue
 
-    if df is None or len(df) < 60:
-        return None
+        if market["quote"] != "USDT":
+            continue
 
-    df["ema20"] = EMAIndicator(df["close"], window=20).ema_indicator()
-    df["ema50"] = EMAIndicator(df["close"], window=50).ema_indicator()
+        if market["active"] is False:
+            continue
 
-    df = df.dropna()
+        pairs.append(symbol)
 
-    if len(df) < 60:
-        return None
+    pairs.sort()
 
-    # trend filter
-    if df["ema20"].iloc[-1] <= df["ema50"].iloc[-1]:
-        return None
+    return pairs
 
-    prev20, prev50 = df["ema20"].iloc[-2], df["ema50"].iloc[-2]
-    curr20, curr50 = df["ema20"].iloc[-1], df["ema50"].iloc[-1]
 
-    # fresh cross
-    if prev20 <= prev50 and curr20 > curr50:
-        return "fresh"
+# ==========================
+# EMA Helper
+# ==========================
 
-    # old cross (last 6 candles)
-    for i in range(len(df) - 6, len(df)):
-        if df["ema20"].iloc[i-1] <= df["ema50"].iloc[i-1] and df["ema20"].iloc[i] > df["ema50"].iloc[i]:
-            return "old"
+def prepare_dataframe(symbol):
 
-    return None
+    df = get_ohlcv(
+        symbol,
+        timeframe=TIMEFRAME,
+        limit=250
+    )
 
-# ----------------------------
-# SCAN SINGLE COIN
-# ----------------------------
+    df = add_ema(
+        df,
+        EMA_FAST,
+        EMA_SLOW
+    )
 
-def scan_coin(symbol):
+    df["ema100"] = df["close"].ewm(
+        span=100,
+        adjust=False
+    ).mean()
 
-    try:
-        df = get_dataframe(symbol)
-        signal = check_signal(df)
+    df["ema200"] = df["close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
 
-        if signal:
-            return symbol, signal
+    return df
 
-    except Exception as e:
-        print(f"scan error {symbol}:", e)
 
-    return None
+def prepare_daily(symbol):
 
-# ----------------------------
-# SCAN ALL
-# ----------------------------
+    df = get_ohlcv(
+        symbol,
+        timeframe="1d",
+        limit=250
+    )
 
-def run_scan():
+    df["ema100"] = df["close"].ewm(
+        span=100,
+        adjust=False
+    ).mean()
 
-    symbols = get_symbols()
+    df["ema200"] = df["close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
 
-    if not symbols:
-        return [], [], 0
-
-    fresh, old = [], []
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(scan_coin, s) for s in symbols]
-
-        for f in as_completed(futures):
-            result = f.result()
-
-            if not result:
-                continue
-
-            symbol, signal = result
-
-            if signal == "fresh":
-                fresh.append(symbol)
-            else:
-                old.append(symbol)
-
-    return fresh, old, len(symbols)
-
-# ----------------------------
-# MESSAGE
-# ----------------------------
-
-def build_message(fresh, old, total):
-
-    ist = timezone(timedelta(hours=5, minutes=30))
-    now = datetime.now(ist)
-
-    msg = f"""
-🚀 EMA20 × EMA50 Scanner
-
-📅 {now.strftime('%d-%m-%Y')}
-⏰ {now.strftime('%I:%M %p')} IST
-
-🔥 Fresh Cross
-{chr(10).join(sorted(fresh)) if fresh else 'No Fresh Cross'}
-Total: {len(fresh)}
-
-📈 Old Cross
-{chr(10).join(sorted(old)) if old else 'No Old Cross'}
-Total: {len(old)}
-
-📊 Total Scanned: {total}
-✅ Scan Completed
-"""
-    return msg
-
-# ----------------------------
-# MAIN
-# ----------------------------
-
-def main():
-
-    fresh, old, total = run_scan()
-
-    message = build_message(fresh, old, total)
-
-    print(message)
-    send_telegram(message)
-
-if __name__ == "__main__":
-    main()
+    return df
