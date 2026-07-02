@@ -1,5 +1,9 @@
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-SYMBOL = os.getenv("SYMBOL", "BTCUSDT")
-INTERVAL = os.getenv("INTERVAL", "1h")
+CHAT_ID = os.getenv("CHAT_ID")
+
+TIMEFRAME = "4h"
+LIMIT = 120
+
+BASE_URL = "https://api.binance.com"
