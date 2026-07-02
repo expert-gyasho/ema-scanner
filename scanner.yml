@@ -1,1 +1,32 @@
+name: EMA Scanner
 
+on:
+  schedule:
+    - cron: "0 0,4,8,12,16,20 * * *"  # UTC times for IST 4H closes starting 05:30 IST
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MAX_CONCURRENCY: "8"
+          PER_SYMBOL_DELAY_SEC: "0.03"
+        run: |
+          python scanner.py
