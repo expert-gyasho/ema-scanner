@@ -1,3 +1,4 @@
+send_message("✅ GitHub Action Started\n\nEMA Scanner is running successfully.")
 # scanner.py
 # Binance Spot USDT EMA20/50 bullish crossover screener (4H)
 # - Scans all Binance SPOT USDT symbols (TRADING)
