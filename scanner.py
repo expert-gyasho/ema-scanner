@@ -53,9 +53,9 @@ async def fetch_json(session: aiohttp.ClientSession, url: str, params: dict = No
         # Binance sometimes returns JSON error payloads with non-200 too
         try:
             data = await resp.json()
-        except Exception:
+        except Exception as e:
             text = await resp.text()
-            raise RuntimeError(f"Non-JSON response: HTTP {resp.status}, body={text[:200]}")
+            raise RuntimeError(f"Non-JSON response: HTTP {resp.status}, body={text[:200]}, error={e}")
         if resp.status != 200:
             raise RuntimeError(f"HTTP {resp.status}: {data}")
         return data
@@ -80,6 +80,12 @@ async def fetch_klines(session: aiohttp.ClientSession, symbol: str, interval: st
 async def get_usdt_spot_symbols(session: aiohttp.ClientSession) -> List[str]:
     url = f"{BINANCE_REST}/api/v3/exchangeInfo"
     data = await fetch_json(session, url)
+
+    # Add defensive check for 'symbols' key
+    if "symbols" not in data:
+        print(f"[ERROR] 'symbols' key missing in exchangeInfo response. Available keys: {data.keys()}")
+        print(f"[ERROR] Full response: {data}")
+        return []
 
     syms = []
     for s in data.get("symbols", []):
@@ -231,7 +237,7 @@ def format_results_grouped(results: List[Dict]) -> Tuple[str, List[str]]:
             lines.append("")
             lines.append(f"{ago} candle(s) ago:")
 
-        # “48hrs data: only names” => here we show only coin name + required EMA100/200 values (4H & 1D)
+        # "48hrs data: only names" => here we show only coin name + required EMA100/200 values (4H & 1D)
         for r in items:
             sym = r["symbol"]
             lines.append(
